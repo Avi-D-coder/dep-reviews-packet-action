@@ -1,0 +1,4 @@
+.dep-review-work/
+.pycache/
+__pycache__/
+*.py[cod]
