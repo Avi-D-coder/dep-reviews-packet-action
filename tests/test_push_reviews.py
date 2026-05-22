@@ -56,13 +56,13 @@ class PushReviewsTests(unittest.TestCase):
             original_run = push_reviews.subprocess.run
             try:
                 push_reviews.subprocess.run = fake_run
-                updated = push_reviews.upload_all(manifest, results)
+                updated = push_reviews.upload_all(manifest, results, "/tmp/reviews")
             finally:
                 push_reviews.subprocess.run = original_run
 
             self.assertEqual(len(calls), 1)
             self.assertEqual(calls[0][1], repo)
-            self.assertEqual(calls[0][0][:2], ["reviews", "push"])
+            self.assertEqual(calls[0][0][:2], ["/tmp/reviews", "push"])
             item = updated["dependencies"][0]
             self.assertEqual(item["status"], "uploaded")
             self.assertEqual(item["review_url"], "https://reviews.example/r/abc")
@@ -113,7 +113,7 @@ class PushReviewsTests(unittest.TestCase):
             original_run = push_reviews.subprocess.run
             try:
                 push_reviews.subprocess.run = fake_run
-                updated = push_reviews.upload_dependency_packet(item)
+                updated = push_reviews.upload_dependency_packet(item, "/tmp/reviews")
             finally:
                 push_reviews.subprocess.run = original_run
 
@@ -151,7 +151,7 @@ class PushReviewsTests(unittest.TestCase):
             original_run = push_reviews.subprocess.run
             try:
                 push_reviews.subprocess.run = fake_run
-                updated = push_reviews.upload_dependency_packet(item)
+                updated = push_reviews.upload_dependency_packet(item, "/tmp/reviews")
             finally:
                 push_reviews.subprocess.run = original_run
 
@@ -190,7 +190,7 @@ class PushReviewsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            def fake_upload(item):
+            def fake_upload(item, reviews_command="reviews"):
                 item["status"] = "uploaded"
                 item["review_url"] = "https://reviews.example/r/dep"
                 return item
@@ -207,6 +207,38 @@ class PushReviewsTests(unittest.TestCase):
 
             rewritten = json.loads((workdir / "results.json").read_text(encoding="utf-8"))
             self.assertEqual(rewritten["dependencies"][0]["review_url"], "https://reviews.example/r/dep")
+
+    def test_reviews_command_uses_action_output_env(self):
+        original = os.environ.get("INPUT_REVIEWS_COMMAND")
+        os.environ["INPUT_REVIEWS_COMMAND"] = "/tmp/reviews-wrapper"
+        try:
+            self.assertEqual(push_reviews.reviews_command(), "/tmp/reviews-wrapper")
+        finally:
+            if original is None:
+                os.environ.pop("INPUT_REVIEWS_COMMAND", None)
+            else:
+                os.environ["INPUT_REVIEWS_COMMAND"] = original
+
+    def test_main_returns_failure_when_any_dependency_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workdir = root / ".dep-review-work"
+            workdir.mkdir()
+            (workdir / "manifest.json").write_text(
+                '{"dependencies":[{"slug":"dep","repo_path":"/nope","packet_path":"/nope"}]}',
+                encoding="utf-8",
+            )
+            (workdir / "results.json").write_text(
+                '{"dependencies":[{"slug":"dep","status":"failed","audit_summary":"audit failed"}]}',
+                encoding="utf-8",
+            )
+
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                self.assertEqual(push_reviews.main(), 1)
+            finally:
+                os.chdir(original_cwd)
 
 
 if __name__ == "__main__":

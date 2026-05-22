@@ -1,4 +1,6 @@
+import os
 import sys
+import tempfile
 import unittest
 
 from pathlib import Path
@@ -14,6 +16,16 @@ class SetupReviewsTests(unittest.TestCase):
         self.assertEqual(setup_reviews.release_tag_for_version("0.0.1-alpha.0"), "cli-v0.0.1-alpha.0")
         self.assertEqual(setup_reviews.release_tag_for_version("v0.0.1-alpha.0"), "cli-v0.0.1-alpha.0")
         self.assertEqual(setup_reviews.release_tag_for_version("cli-v0.0.1-alpha.0"), "cli-v0.0.1-alpha.0")
+
+    def test_release_api_url_honors_repo_and_version(self):
+        self.assertEqual(
+            setup_reviews.release_api_url("0.0.1-alpha.0", "example/reviews"),
+            "https://api.github.com/repos/example/reviews/releases/tags/cli-v0.0.1-alpha.0",
+        )
+        self.assertEqual(
+            setup_reviews.release_api_url("", "example/reviews"),
+            "https://api.github.com/repos/example/reviews/releases",
+        )
 
     def test_select_release_assets_for_target(self):
         release = {
@@ -46,6 +58,21 @@ class SetupReviewsTests(unittest.TestCase):
         self.assertEqual(setup_reviews.platform_target("Linux", "x86_64"), "linux-x64")
         self.assertEqual(setup_reviews.platform_target("Linux", "aarch64"), "linux-arm64")
         self.assertEqual(setup_reviews.platform_target("Darwin", "arm64"), "macos-arm64")
+
+    def test_write_outputs_writes_reviews_command_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "github-output"
+            original = os.environ.get("GITHUB_OUTPUT")
+            os.environ["GITHUB_OUTPUT"] = str(output)
+            try:
+                setup_reviews.write_outputs({"reviews-command": "/tmp/reviews"})
+            finally:
+                if original is None:
+                    os.environ.pop("GITHUB_OUTPUT", None)
+                else:
+                    os.environ["GITHUB_OUTPUT"] = original
+
+            self.assertEqual(output.read_text(encoding="utf-8"), "reviews-command=/tmp/reviews\n")
 
 
 if __name__ == "__main__":

@@ -94,7 +94,7 @@ class PostCommentTests(unittest.TestCase):
 
         self.assertIn("1.0.0 (git) -> 1.0.1 (crates.io)", body)
 
-    def test_maybe_upsert_comment_continues_on_comment_error(self):
+    def test_maybe_upsert_comment_raises_on_comment_error(self):
         class Args:
             comment_on_pr = True
             github_token = "token"
@@ -109,7 +109,8 @@ class PostCommentTests(unittest.TestCase):
                 raise RuntimeError("GitHub API request failed: 403")
 
             post_comment.upsert_comment = fail_upsert
-            self.assertEqual(post_comment.maybe_upsert_comment(Args(), "body"), "")
+            with self.assertRaises(RuntimeError):
+                post_comment.maybe_upsert_comment(Args(), "body")
         finally:
             post_comment.pull_request_number = original_pull_request_number
             post_comment.upsert_comment = original_upsert_comment
@@ -137,6 +138,15 @@ class PostCommentTests(unittest.TestCase):
             post_comment.upsert_comment = original_upsert_comment
 
         self.assertEqual(seen["pr_number"], 42)
+
+    def test_maybe_upsert_comment_requires_token_when_enabled(self):
+        class Args:
+            comment_on_pr = True
+            github_token = ""
+            pr_number = "42"
+
+        with self.assertRaises(RuntimeError):
+            post_comment.maybe_upsert_comment(Args(), "body")
 
 
 if __name__ == "__main__":

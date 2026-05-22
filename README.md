@@ -102,6 +102,8 @@ Commenting requires:
 
 Outside a PR event, pass `pr-number` to create or update a PR comment. Without a PR event or `pr-number`, the action does not create a comment. It still writes the same report to `$GITHUB_STEP_SUMMARY`.
 
+The action writes the PR comment after the audit and upload attempts even when a dependency audit or Reviews upload fails, then fails the workflow after the comment is published so maintainers get both a failing check and the detailed PR report. If PR commenting is enabled and GitHub rejects the comment update, the action fails instead of silently dropping the report.
+
 ## Inputs
 
 | Input | Required | Default | Description |

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-RELEASES_API_BASE = "https://api.github.com/repos/figitaki/reviews/releases"
+DEFAULT_REVIEWS_REPO = "figitaki/reviews"
 
 
 def main() -> int:
@@ -25,13 +25,14 @@ def main() -> int:
     runner_temp = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir()))
     workdir = Path(args.workdir)
     wrapper_bin = workdir / "bin"
-    install_dir = runner_temp / "dep-review-reviews-bin"
+    install_dir = Path(args.install_dir)
     reviews_home = runner_temp / "dep-review-reviews-home"
 
-    install_reviews_cli(args.version, install_dir)
+    install_reviews_cli(args.version, install_dir, args.repo)
     write_reviews_config(reviews_home, args.server_url, args.api_key)
     write_wrapper(wrapper_bin, install_dir / "reviews", reviews_home)
     add_path(wrapper_bin)
+    write_outputs({"reviews-command": str(wrapper_bin / "reviews")})
 
     print(f"Configured Reviews CLI wrapper at {wrapper_bin / 'reviews'}")
     return 0
@@ -42,17 +43,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workdir", default=".dep-review-work")
     parser.add_argument("--server-url", default=os.environ.get("INPUT_REVIEWS_SERVER_URL", "https://reviews-dev.fly.dev"))
     parser.add_argument("--api-key", default=os.environ.get("INPUT_REVIEWS_API_KEY", ""))
-    parser.add_argument("--version", default=os.environ.get("INPUT_REVIEWS_CLI_VERSION", "0.0.1-alpha.0"))
+    parser.add_argument(
+        "--version",
+        default=os.environ.get("INPUT_REVIEWS_CLI_VERSION") or os.environ.get("REVIEWS_VERSION") or "0.0.1-alpha.0",
+    )
+    parser.add_argument("--repo", default=os.environ.get("REVIEWS_REPO", DEFAULT_REVIEWS_REPO))
+    parser.add_argument(
+        "--install-dir",
+        default=os.environ.get("INSTALL_DIR")
+        or str(Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir())) / "dep-review-reviews-bin"),
+    )
     args = parser.parse_args()
     if not args.api_key:
         raise SystemExit("Reviews API key is required")
     return args
 
 
-def install_reviews_cli(version: str, install_dir: Path) -> None:
+def install_reviews_cli(version: str, install_dir: Path, repo: str = DEFAULT_REVIEWS_REPO) -> None:
     install_dir.mkdir(parents=True, exist_ok=True)
     target = platform_target()
-    release = fetch_release(version)
+    release = fetch_release(version, repo)
     asset_url, asset_name, checksum_url = select_release_assets(release, target)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -95,13 +105,20 @@ def release_tag_for_version(version: str) -> str:
     return f"cli-v{version}"
 
 
-def fetch_release(version: str) -> dict[str, Any]:
+def release_api_url(version: str, repo: str) -> str:
+    repo = repo.strip() or DEFAULT_REVIEWS_REPO
+    if version.strip():
+        tag = urllib.parse.quote(release_tag_for_version(version), safe="")
+        return f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+    return f"https://api.github.com/repos/{repo}/releases"
+
+
+def fetch_release(version: str, repo: str = DEFAULT_REVIEWS_REPO) -> dict[str, Any]:
     override = os.environ.get("REVIEWS_RELEASES_API_URL")
     if override:
         url = override
     else:
-        tag = urllib.parse.quote(release_tag_for_version(version), safe="")
-        url = f"{RELEASES_API_BASE}/tags/{tag}"
+        url = release_api_url(version, repo)
 
     payload = request_bytes(url)
     data = json.loads(payload.decode("utf-8"))
@@ -242,6 +259,17 @@ def add_path(path: Path) -> None:
     if github_path:
         with open(github_path, "a", encoding="utf-8") as fh:
             fh.write(str(path) + "\n")
+
+
+def write_outputs(outputs: dict[str, str]) -> None:
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if not output_path:
+        return
+    with open(output_path, "a", encoding="utf-8") as fh:
+        for name, value in outputs.items():
+            if "\n" in value:
+                raise RuntimeError(f"output {name} cannot contain newlines")
+            fh.write(f"{name}={value}\n")
 
 
 def toml_string(value: str) -> str:

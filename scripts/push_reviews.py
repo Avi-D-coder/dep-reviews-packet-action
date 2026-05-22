@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -18,12 +19,20 @@ def main() -> int:
     workdir = Path(".dep-review-work")
     manifest = load_json(workdir / "manifest.json", {"dependencies": []})
     results = load_json(workdir / "results.json", {"dependencies": []})
-    updated = upload_all(manifest, results)
+    updated = upload_all(manifest, results, reviews_command())
     write_json(workdir / "results.json", updated)
-    return 0
+    return 1 if has_failed_dependencies(updated) else 0
 
 
-def upload_all(manifest: dict[str, Any], results: dict[str, Any]) -> dict[str, Any]:
+def reviews_command() -> str:
+    return os.environ.get("INPUT_REVIEWS_COMMAND", "").strip() or "reviews"
+
+
+def upload_all(
+    manifest: dict[str, Any],
+    results: dict[str, Any],
+    reviews_command: str = "reviews",
+) -> dict[str, Any]:
     by_slug = {item.get("slug"): item for item in results.get("dependencies", [])}
     uploaded = []
     for dependency in manifest.get("dependencies", []):
@@ -40,16 +49,16 @@ def upload_all(manifest: dict[str, Any], results: dict[str, Any]) -> dict[str, A
             item["audit_summary"] = item.get("audit_summary") or "Claude did not mark the packet ready for upload."
             uploaded.append(item)
             continue
-        uploaded.append(upload_dependency_packet(item))
+        uploaded.append(upload_dependency_packet(item, reviews_command))
     return {"dependencies": uploaded}
 
 
-def upload_dependency_packet(item: dict[str, Any]) -> dict[str, Any]:
+def upload_dependency_packet(item: dict[str, Any], reviews_command: str = "reviews") -> dict[str, Any]:
     repo_path = Path(item["repo_path"])
     packet_path = Path(item["packet_path"])
     title = f"Cargo dependency audit: {item.get('name')} {item.get('change_label')}"
     cmd = [
-        "reviews",
+        reviews_command,
         "push",
         "--title",
         title,
@@ -94,6 +103,10 @@ def upload_dependency_packet(item: dict[str, Any]) -> dict[str, Any]:
     item["severity"] = item.get("severity") or "unknown"
     item["audit_summary"] = item.get("audit_summary") or "Packet uploaded to Reviews."
     return item
+
+
+def has_failed_dependencies(results: dict[str, Any]) -> bool:
+    return any(item.get("status") == "failed" for item in results.get("dependencies", []))
 
 
 def parse_review_url(output: str) -> str:

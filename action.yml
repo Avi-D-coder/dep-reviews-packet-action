@@ -115,11 +115,21 @@ runs:
         INPUT_REVIEWS_API_KEY: ${{ inputs.reviews-api-key }}
         INPUT_REVIEWS_SERVER_URL: ${{ inputs.reviews-server-url }}
         INPUT_REVIEWS_CLI_VERSION: ${{ inputs.reviews-cli-version }}
+        REVIEWS_VERSION: ${{ inputs.reviews-cli-version }}
+        INSTALL_DIR: ${{ runner.temp }}/dep-review-reviews-bin
 
     - name: Upload Reviews packets
       if: ${{ steps.prepare.outputs.dependency-count != '0' }}
       shell: bash
-      run: python3 "$GITHUB_ACTION_PATH/scripts/push_reviews.py"
+      run: |
+        set +e
+        python3 "$GITHUB_ACTION_PATH/scripts/push_reviews.py"
+        status="$?"
+        mkdir -p .dep-review-work
+        printf '%s\n' "$status" > .dep-review-work/upload-exit-code
+        exit 0
+      env:
+        INPUT_REVIEWS_COMMAND: ${{ steps.setup-reviews.outputs.reviews-command }}
 
     - name: Comment on pull request
       id: comment
@@ -130,3 +140,16 @@ runs:
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+
+    - name: Fail if dependency review failed
+      if: ${{ always() && steps.prepare.outputs.dependency-count != '0' }}
+      shell: bash
+      run: |
+        status=0
+        if [ -f .dep-review-work/upload-exit-code ]; then
+          status="$(cat .dep-review-work/upload-exit-code)"
+        fi
+        if [ "$status" != "0" ]; then
+          echo "Dependency review completed with failures after publishing the PR comment."
+          exit "$status"
+        fi
