@@ -174,8 +174,8 @@ Audit only this dependency entry. Do not inspect or upload any other dependency 
 
 Steps:
 1. Read diff_path and hunks_path carefully. Do not run dependency build scripts, tests, examples, shell commands, or arbitrary dependency code.
-2. Inspect relevant changed source files with Read, Grep, Glob, and LS only.
-3. Perform a security review of the dependency source change. Pay particular attention to build.rs, proc macros, unsafe code, network/file/process execution, credential handling, dependency graph changes, generated code, platform-specific code, and obfuscated or minified content.
+2. Treat the diff as the primary review target. Use the full new dependency source tree at repo_path as context for changed files, referenced symbols, feature gates, build configuration, platform-specific paths, and security-sensitive call paths.
+3. Perform a security review of the dependency source change with a supply-chain attack mindset. Look for malicious or suspicious behavior, backdoors, typosquat-style package/source changes, hidden code execution, credential or environment access, network/file/process I/O that could be exploited by consumers, unsafe code that could cause undefined behavior or memory unsafety, FFI, proc macros, build scripts, dependency graph changes, generated/obfuscated/minified code, parser/deserializer edge cases, crypto/auth changes, and privilege-boundary mistakes.
 4. Refine the provided packet_path markdown into a useful Reviews packet. Keep every changed line covered exactly once by @hunk references. Include the full contents of your security audit in the packet itself: audit verdict, notable findings, suspicious build script or proc-macro changes, sensitive code paths reviewed, limitations, and a guided walkthrough of the diff.
 5. Do not run reviews push. A trusted post-processing step uploads the packet after this Claude conversation finishes.
 
