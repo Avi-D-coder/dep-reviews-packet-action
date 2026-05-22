@@ -260,6 +260,8 @@ checksum = "ccc"
             dep = manifest["dependencies"][0]
             self.assertEqual(dep["change_kind"], "version-update")
             self.assertTrue(Path(repo / dep["packet_path"]).is_file())
+            self.assertTrue(Path(repo / dep["diff_path"]).is_file())
+            self.assertIn("+pub const V: u8 = 2;", Path(repo / dep["diff_path"]).read_text(encoding="utf-8"))
             self.assertTrue(Path(repo / dep["repo_path"]).is_dir())
 
     def test_prepare_dry_run_with_fixture_source_migration(self):

@@ -31,12 +31,20 @@ inputs:
     description: Whether to create or update a sticky PR comment.
     required: false
     default: "true"
+  pr-number:
+    description: Pull request number to comment on when the workflow is manually triggered.
+    required: false
+    default: ""
   reviews-cli-version:
     description: Reviews CLI version to install.
     required: false
     default: 0.0.1-alpha.0
+  claude-model:
+    description: Claude Code model or alias. The default `sonnet` alias tracks the latest Sonnet model.
+    required: false
+    default: sonnet
   claude-args:
-    description: Extra arguments passed to Claude Code.
+    description: Limited extra Claude Code CLI arguments. Only --max-turns, --max-budget-usd, --effort, --fallback-model, --betas, and --include-partial-messages are accepted.
     required: false
     default: ""
 
@@ -63,6 +71,41 @@ runs:
         INPUT_BASE_REF: ${{ inputs.base-ref }}
         INPUT_HEAD_REF: ${{ inputs.head-ref }}
 
+    - name: Upload dependency source artifacts
+      if: ${{ steps.prepare.outputs.artifact-count != '0' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: dep-review-new-sources-${{ github.run_id }}
+        path: .dep-review-work/artifacts/*.tar.gz
+        if-no-files-found: ignore
+
+    - name: Install Claude Code CLI
+      if: ${{ steps.prepare.outputs.dependency-count != '0' }}
+      shell: bash
+      run: npm install -g @anthropic-ai/claude-code
+
+    - name: Audit dependency diffs and write Reviews packets
+      id: claude
+      if: ${{ steps.prepare.outputs.dependency-count != '0' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        umask 077
+        temp_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+        mkdir -p "$temp_root"
+        key_file="$(mktemp "$temp_root/dep-reviews-anthropic-key.XXXXXX")"
+        cleanup() {
+          rm -f "$key_file"
+        }
+        trap cleanup EXIT
+        printf '%s' "$ANTHROPIC_API_KEY_INPUT" > "$key_file"
+        unset ANTHROPIC_API_KEY_INPUT
+        INPUT_ANTHROPIC_API_KEY_FILE="$key_file" python3 "$GITHUB_ACTION_PATH/scripts/run_claude.py"
+      env:
+        ANTHROPIC_API_KEY_INPUT: ${{ inputs.anthropic-api-key }}
+        INPUT_CLAUDE_MODEL: ${{ inputs.claude-model }}
+        INPUT_CLAUDE_ARGS: ${{ inputs.claude-args }}
+
     - name: Install and configure Reviews CLI
       id: setup-reviews
       if: ${{ steps.prepare.outputs.dependency-count != '0' }}
@@ -73,52 +116,10 @@ runs:
         INPUT_REVIEWS_SERVER_URL: ${{ inputs.reviews-server-url }}
         INPUT_REVIEWS_CLI_VERSION: ${{ inputs.reviews-cli-version }}
 
-    - name: Upload dependency source artifacts
-      if: ${{ steps.prepare.outputs.artifact-count != '0' }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: dep-review-new-sources-${{ github.run_id }}
-        path: .dep-review-work/artifacts/*.tar.gz
-        if-no-files-found: ignore
-
-    - name: Audit dependency diffs and publish Reviews packets
-      id: claude
+    - name: Upload Reviews packets
       if: ${{ steps.prepare.outputs.dependency-count != '0' }}
-      uses: anthropics/claude-code-action@v1
-      with:
-        anthropic_api_key: ${{ inputs.anthropic-api-key }}
-        prompt: |
-          You are auditing third-party Cargo dependency source changes prepared by this action.
-
-          Load the Reviews skills from the added action directory, especially writing-review-packets and using-reviews-locally. Read .dep-review-work/manifest.json first.
-
-          For each dependency entry in manifest.dependencies:
-          1. cd into repo_path.
-          2. Inspect git diff HEAD~1..HEAD carefully. Do not run dependency build scripts, tests, examples, or arbitrary dependency code.
-          3. Perform a security review of the dependency source change. Pay particular attention to build.rs, proc macros, unsafe code, network/file/process execution, credential handling, dependency graph changes, generated code, platform-specific code, and obfuscated or minified content.
-          4. Refine the provided packet_path markdown into a useful Reviews packet. Keep every changed line covered exactly once by @hunk references. Include the audit verdict, notable security findings, suspicious build script or proc-macro changes, and a guided walkthrough of the diff.
-          5. Run: reviews push --title "Cargo dependency audit: <name> <change_label>" --description "Automated dependency source audit from GitHub Actions." --range HEAD~1..HEAD --packet <packet_path>
-          6. Capture the Reviews URL and patchset number printed by the CLI.
-
-          Write the final JSON result to manifest.results_path when finished with this exact shape:
-          {
-            "dependencies": [
-              {
-                "slug": "manifest slug",
-                "status": "uploaded",
-                "review_url": "https://...",
-                "patchset_number": 1,
-                "severity": "none|low|medium|high|critical",
-                "audit_summary": "one concise sentence"
-              }
-            ]
-          }
-
-          If a dependency cannot be uploaded, include it with status "failed", an empty review_url, severity "unknown", and audit_summary explaining the failure.
-        claude_args: |
-          --add-dir "${{ github.action_path }}"
-          --max-turns 25
-          ${{ inputs.claude-args }}
+      shell: bash
+      run: python3 "$GITHUB_ACTION_PATH/scripts/push_reviews.py"
 
     - name: Comment on pull request
       id: comment
@@ -128,3 +129,4 @@ runs:
       env:
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}

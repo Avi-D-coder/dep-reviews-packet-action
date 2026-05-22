@@ -1,6 +1,6 @@
 # Cargo Dependency Reviews GitHub Action
 
-This action audits external Cargo dependency upgrades from `Cargo.lock`. For each changed dependency it materializes the old and new source, creates a synthetic git diff, asks Claude Code to perform a security audit and write a Reviews packet, uploads the packet to Reviews, and posts a sticky PR comment with review links and local checkout commands.
+This action audits external Cargo dependency upgrades from `Cargo.lock`. For each changed dependency it materializes the old and new source, creates a synthetic git diff, asks Claude Code to perform a security audit and write a Reviews packet, uploads the packet from a trusted post-processing step, and posts a sticky PR comment with review links and local checkout commands.
 
 ## Usage
 
@@ -8,9 +8,12 @@ This action audits external Cargo dependency upgrades from `Cargo.lock`. For eac
 name: Dependency reviews
 
 on:
-  pull_request:
-    paths:
-      - Cargo.lock
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to audit
+        required: true
+        type: number
 
 permissions:
   contents: read
@@ -23,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: refs/pull/${{ inputs.pr }}/merge
           fetch-depth: 0
 
       - uses: Avi-D-coder/dep-reviews-packet-action@v1
@@ -30,9 +34,46 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           reviews-api-key: ${{ secrets.REVIEWS_API_KEY }}
           github-token: ${{ github.token }}
+          pr-number: ${{ inputs.pr }}
+          base-ref: HEAD^1
+          head-ref: HEAD^2
 ```
 
-Use normal `pull_request` events for trusted contexts. Do not run this action with repository secrets on untrusted fork code via `pull_request_target`.
+This is intentionally manual by default. A maintainer or repository member can run it from the Actions tab with the PR number after deciding the dependency diff is worth auditing. Do not run this action automatically on every `pull_request` or `push` unless you are comfortable spending Claude and Reviews quota on every update.
+
+Avoid `pull_request_target` for this workflow. It is easy to accidentally combine repository secrets with untrusted PR content.
+
+## Optional PR slash command
+
+Teams that want an easier PR flow can add a small command workflow that dispatches the manual workflow when a maintainer comments `/dep-review`:
+
+```yaml
+name: Request dependency review
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  issues: read
+  pull-requests: read
+
+jobs:
+  dispatch:
+    if: >
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/dep-review' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: gh workflow run dependency-reviews.yml --repo "$GITHUB_REPOSITORY" -f pr="$PR_NUMBER"
+```
+
+The command workflow should only dispatch the manual workflow; it should not check out or audit PR code itself.
 
 ## Secrets
 
@@ -59,13 +100,13 @@ Commenting requires:
 - `github-token` set, usually to `${{ github.token }}`.
 - Workflow permission `issues: write`, because GitHub PR comments are issue comments.
 
-Outside a PR event, the action does not create a comment. It still writes the same report to `$GITHUB_STEP_SUMMARY`.
+Outside a PR event, pass `pr-number` to create or update a PR comment. Without a PR event or `pr-number`, the action does not create a comment. It still writes the same report to `$GITHUB_STEP_SUMMARY`.
 
 ## Inputs
 
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
-| `anthropic-api-key` | yes | | Anthropic API key for `anthropics/claude-code-action@v1`. |
+| `anthropic-api-key` | yes | | Anthropic API key for the Claude Code CLI. |
 | `reviews-api-key` | yes | | Reviews API key. |
 | `reviews-server-url` | no | `https://reviews-dev.fly.dev` | Reviews server URL. |
 | `github-token` | yes | | Token used to create or update the PR comment. |
@@ -73,8 +114,10 @@ Outside a PR event, the action does not create a comment. It still writes the sa
 | `base-ref` | no | PR base SHA or `HEAD~1` | Base ref used to read the old lockfile. |
 | `head-ref` | no | PR head SHA or `HEAD` | Head ref used to read the new lockfile. |
 | `comment-on-pr` | no | `true` | Whether to create or update a sticky PR comment. |
+| `pr-number` | no | | Pull request number to comment on when the workflow is manually triggered. |
 | `reviews-cli-version` | no | `0.0.1-alpha.0` | Reviews CLI release version. |
-| `claude-args` | no | | Extra Claude Code CLI arguments. |
+| `claude-model` | no | `sonnet` | Claude Code model or alias. `sonnet` tracks the latest Sonnet model. |
+| `claude-args` | no | | Limited extra Claude Code CLI arguments. Only `--max-turns`, `--max-budget-usd`, `--effort`, `--fallback-model`, `--betas`, and `--include-partial-messages` are accepted. |
 
 ## Outputs
 
@@ -93,7 +136,13 @@ Outside a PR event, the action does not create a comment. It still writes the sa
 - Downloads crates.io archives and verifies `Cargo.lock` checksums.
 - Clones git dependencies and checks out the exact lockfile revision.
 - Falls back to `cargo vendor --locked --versioned-dirs` for other Cargo source styles.
-- Installs the Reviews CLI from the requested `cli-v*` release asset and verifies it against release checksums.
+- Installs and runs the Claude Code CLI directly with `--model` set from `claude-model`.
+- Runs a separate Claude Code CLI conversation for each dependency and streams the verbose turn-by-turn output to the GitHub Actions log.
+- Runs Claude Code from a neutral per-dependency working directory with `--setting-sources user`, so dependency-provided `.claude/settings.json` and `CLAUDE.md` files are not loaded as project configuration.
+- Runs Claude Code in `dontAsk` mode with only narrow `Read`, `Grep`, `Glob`, `LS`, `Edit`, and `Write` permissions for that dependency's prepared directory and the vendored packet-writing skill.
+- Denies Claude Code `Bash`, `WebFetch`, `WebSearch`, subagents, and reads of the temporary auth directory, key file directory, and `/proc`.
+- Gives Claude Code its Anthropic credential through an `apiKeyHelper` in a temporary Claude home, without passing `ANTHROPIC_API_KEY` to the Claude child process.
+- Installs the Reviews CLI only after Claude Code finishes, then uploads packets from a trusted script outside the Claude conversation.
 - Does not run dependency build scripts, tests, examples, or arbitrary dependency code.
 - Uploads new dependency source tarballs as workflow artifacts for local reproduction fallback.
 

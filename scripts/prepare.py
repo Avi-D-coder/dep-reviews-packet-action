@@ -383,8 +383,10 @@ def prepare_change(change: Change, workdir: Path, base_ref: str, head_ref: str, 
 
     raw_diff = run(["git", "diff", "--unified=3", "HEAD~1..HEAD"], cwd=repo).stdout
     hunks = parse_diff_hunks(raw_diff)
+    diff_path = dep_dir / "diff.patch"
     hunks_path = dep_dir / "hunks.json"
     packet_path = dep_dir / "packet.md"
+    diff_path.write_text(raw_diff, encoding="utf-8")
     write_json(hunks_path, {"hunks": hunks})
     packet_path.write_text(packet_skeleton(change, hunks), encoding="utf-8")
 
@@ -404,6 +406,7 @@ def prepare_change(change: Change, workdir: Path, base_ref: str, head_ref: str, 
         "old_materialized_from": old_info,
         "new_materialized_from": new_info,
         "repo_path": str(repo),
+        "diff_path": str(diff_path),
         "packet_path": str(packet_path),
         "hunks_path": str(hunks_path),
         "artifact": {

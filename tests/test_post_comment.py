@@ -94,6 +94,50 @@ class PostCommentTests(unittest.TestCase):
 
         self.assertIn("1.0.0 (git) -> 1.0.1 (crates.io)", body)
 
+    def test_maybe_upsert_comment_continues_on_comment_error(self):
+        class Args:
+            comment_on_pr = True
+            github_token = "token"
+            pr_number = ""
+
+        original_pull_request_number = post_comment.pull_request_number
+        original_upsert_comment = post_comment.upsert_comment
+        try:
+            post_comment.pull_request_number = lambda: 1
+
+            def fail_upsert(token, pr_number, body):
+                raise RuntimeError("GitHub API request failed: 403")
+
+            post_comment.upsert_comment = fail_upsert
+            self.assertEqual(post_comment.maybe_upsert_comment(Args(), "body"), "")
+        finally:
+            post_comment.pull_request_number = original_pull_request_number
+            post_comment.upsert_comment = original_upsert_comment
+
+    def test_maybe_upsert_comment_uses_explicit_pr_number(self):
+        class Args:
+            comment_on_pr = True
+            github_token = "token"
+            pr_number = "42"
+
+        original_pull_request_number = post_comment.pull_request_number
+        original_upsert_comment = post_comment.upsert_comment
+        seen = {}
+        try:
+            post_comment.pull_request_number = lambda: None
+
+            def upsert(token, pr_number, body):
+                seen["pr_number"] = pr_number
+                return "https://github.example/comment"
+
+            post_comment.upsert_comment = upsert
+            self.assertEqual(post_comment.maybe_upsert_comment(Args(), "body"), "https://github.example/comment")
+        finally:
+            post_comment.pull_request_number = original_pull_request_number
+            post_comment.upsert_comment = original_upsert_comment
+
+        self.assertEqual(seen["pr_number"], 42)
+
 
 if __name__ == "__main__":
     unittest.main()

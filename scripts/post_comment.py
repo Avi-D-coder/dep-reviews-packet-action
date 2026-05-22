@@ -27,16 +27,7 @@ def main() -> int:
     summary = render_body(manifest, results, include_marker=False)
     write_step_summary(summary)
 
-    comment_url = ""
-    if args.comment_on_pr and args.github_token:
-        pr_number = pull_request_number()
-        if pr_number:
-            comment_url = upsert_comment(args.github_token, pr_number, body)
-            print(f"Updated PR comment: {comment_url}")
-        else:
-            print("No pull request context found; skipped PR comment.")
-    else:
-        print("PR comments disabled or GitHub token missing.")
+    comment_url = maybe_upsert_comment(args, body)
 
     review_urls = [
         item.get("review_url", "")
@@ -62,6 +53,7 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("INPUT_COMMENT_ON_PR", "true").lower() == "true",
         action=argparse.BooleanOptionalAction,
     )
+    parser.add_argument("--pr-number", default=os.environ.get("INPUT_PR_NUMBER", ""))
     return parser.parse_args()
 
 
@@ -221,6 +213,39 @@ def pull_request_number() -> Optional[int]:
     if "issue" in event and event["issue"].get("pull_request"):
         return int(event["issue"]["number"])
     return None
+
+
+def maybe_upsert_comment(args: argparse.Namespace, body: str) -> str:
+    if not args.comment_on_pr or not args.github_token:
+        print("PR comments disabled or GitHub token missing.")
+        return ""
+
+    pr_number = explicit_pr_number(args.pr_number) or pull_request_number()
+    if not pr_number:
+        print("No pull request context found; skipped PR comment.")
+        return ""
+
+    try:
+        comment_url = upsert_comment(args.github_token, pr_number, body)
+    except RuntimeError as exc:
+        print(f"Warning: failed to create or update PR comment: {exc}")
+        return ""
+
+    print(f"Updated PR comment: {comment_url}")
+    return comment_url
+
+
+def explicit_pr_number(value: str) -> Optional[int]:
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"invalid PR number: {value}") from exc
+    if number <= 0:
+        raise RuntimeError(f"invalid PR number: {value}")
+    return number
 
 
 def upsert_comment(token: str, pr_number: int, body: str) -> str:
