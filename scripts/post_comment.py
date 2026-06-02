@@ -260,22 +260,29 @@ def upsert_comment(token: str, pr_number: int, body: str) -> str:
 
     existing = find_existing_comment(token, comments_url)
     if existing:
-        response = request_json(token, existing["url"], method="PATCH", data={"body": body})
-    else:
-        response = request_json(token, comments_url, method="POST", data={"body": body})
+        try:
+            response = request_json(token, existing["url"], method="PATCH", data={"body": body})
+            return str(response.get("html_url", ""))
+        except RuntimeError as exc:
+            if "GitHub API request failed: 403" not in str(exc):
+                raise
+            print(f"Warning: could not update existing PR comment; creating a new comment instead: {exc}")
+
+    response = request_json(token, comments_url, method="POST", data={"body": body})
     return str(response.get("html_url", ""))
 
 
 def find_existing_comment(token: str, comments_url: str) -> Optional[dict[str, Any]]:
     page = 1
+    latest = None
     while True:
         url = f"{comments_url}?per_page=100&page={page}"
         comments = request_json(token, url)
         if not comments:
-            return None
+            return latest
         for comment in comments:
             if MARKER in comment.get("body", ""):
-                return comment
+                latest = comment
         page += 1
 
 

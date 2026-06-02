@@ -24,6 +24,15 @@ jobs:
   dep-reviews:
     runs-on: ubuntu-latest
     steps:
+      - name: Prepare Codex sandbox
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
       - uses: actions/checkout@v5
         with:
           ref: refs/pull/${{ inputs.pr }}/merge
@@ -142,7 +151,7 @@ The action writes the PR comment after the audit and upload attempts even when a
 - Falls back to `cargo vendor --locked --versioned-dirs` for other Cargo source styles.
 - Installs and runs Codex CLI directly with `codex exec`; `codex-model` is passed only when set.
 - Runs a separate Codex CLI non-interactive run for each dependency and streams JSONL events to the GitHub Actions log.
-- Runs Codex from a neutral per-dependency working directory with project root discovery disabled, web search disabled, hooks disabled, subagents disabled, approval policy set to `never`, sandbox set to `workspace-write`, and a custom permissions profile that reads the prepared dependency directory but only writes the packet markdown and final structured output.
+- Runs Codex from a neutral per-dependency working directory with project root discovery disabled, web search disabled, hooks disabled, subagents disabled, approval policy set to `never`, sandbox set to `workspace-write`, network access disabled, and a custom permissions profile that reads the prepared dependency directory but only writes the packet markdown and final structured output.
 - Copies the vendored packet-writing guidance into the prepared dependency directory before each Codex run, so Codex does not need access to action-owned guidance outside that workspace.
 - Gives Codex the OpenAI credential only as `CODEX_API_KEY` on the single `codex exec` subprocess; the wrapper removes `OPENAI_API_KEY`, Reviews secrets, GitHub tokens, and action inputs from the child environment.
 - Hashes the prepared dependency workspace before and after Codex runs and marks the dependency failed if Codex changes anything except the packet markdown and final structured output.
