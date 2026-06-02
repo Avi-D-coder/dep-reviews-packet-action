@@ -89,7 +89,7 @@ def result_items(manifest: dict[str, Any], results: dict[str, Any]) -> list[dict
         if not merged.get("severity"):
             merged["severity"] = "unknown"
         if not merged.get("audit_summary"):
-            merged["audit_summary"] = "Claude did not write a result for this dependency."
+            merged["audit_summary"] = "Codex did not write a result for this dependency."
         items.append(merged)
     return items
 

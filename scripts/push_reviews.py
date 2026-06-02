@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload prepared Reviews packets outside the Claude Code conversation."""
+"""Upload prepared Reviews packets outside the Codex CLI run."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def upload_all(
             item["review_url"] = ""
             item["patchset_number"] = None
             item["severity"] = item.get("severity") or "unknown"
-            item["audit_summary"] = item.get("audit_summary") or "Claude did not mark the packet ready for upload."
+            item["audit_summary"] = item.get("audit_summary") or "Codex did not mark the packet ready for upload."
             uploaded.append(item)
             continue
         uploaded.append(upload_dependency_packet(item, reviews_command))

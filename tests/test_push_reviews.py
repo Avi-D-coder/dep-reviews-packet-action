@@ -14,7 +14,7 @@ import push_reviews  # noqa: E402
 
 
 class PushReviewsTests(unittest.TestCase):
-    def test_upload_all_pushes_packet_ready_results_outside_claude(self):
+    def test_upload_all_pushes_packet_ready_results_outside_codex(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dep_dir = root / "dep"
@@ -89,7 +89,7 @@ class PushReviewsTests(unittest.TestCase):
         self.assertEqual(updated["dependencies"][0]["review_url"], "")
         self.assertIn("did not mark the packet ready", updated["dependencies"][0]["audit_summary"])
 
-    def test_upload_failure_replaces_claude_summary_with_upload_error(self):
+    def test_upload_failure_replaces_codex_summary_with_upload_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             repo = root / "repo"

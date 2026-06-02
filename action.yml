@@ -2,8 +2,8 @@ name: Cargo Dependency Reviews
 description: Audit changed external Cargo dependencies and publish Reviews packets.
 
 inputs:
-  anthropic-api-key:
-    description: Anthropic API key for Claude Code.
+  openai-api-key:
+    description: OpenAI API key for Codex CLI.
     required: true
   reviews-api-key:
     description: Reviews API key used by the Reviews CLI.
@@ -39,12 +39,12 @@ inputs:
     description: Reviews CLI version to install.
     required: false
     default: 0.0.1-alpha.0
-  claude-model:
-    description: Claude Code model or alias. The default `sonnet` alias tracks the latest Sonnet model.
+  codex-model:
+    description: Codex CLI model. Leave empty to use the Codex CLI recommended default.
     required: false
-    default: sonnet
-  claude-args:
-    description: Limited extra Claude Code CLI arguments. Only --max-turns, --max-budget-usd, --effort, --fallback-model, --betas, and --include-partial-messages are accepted.
+    default: ""
+  codex-args:
+    description: Limited extra Codex CLI arguments. Only --color and --strict-config are accepted.
     required: false
     default: ""
 
@@ -79,13 +79,18 @@ runs:
         path: .dep-review-work/artifacts/*.tar.gz
         if-no-files-found: ignore
 
-    - name: Install Claude Code CLI
+    - name: Install Codex CLI
       if: ${{ steps.prepare.outputs.dependency-count != '0' }}
       shell: bash
-      run: npm install -g @anthropic-ai/claude-code
+      run: |
+        set -euo pipefail
+        install_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/dep-review-codex-bin"
+        mkdir -p "$install_dir"
+        curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 CODEX_INSTALL_DIR="$install_dir" sh
+        echo "$install_dir" >> "$GITHUB_PATH"
 
     - name: Audit dependency diffs and write Reviews packets
-      id: claude
+      id: codex
       if: ${{ steps.prepare.outputs.dependency-count != '0' }}
       shell: bash
       run: |
@@ -93,18 +98,18 @@ runs:
         umask 077
         temp_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
         mkdir -p "$temp_root"
-        key_file="$(mktemp "$temp_root/dep-reviews-anthropic-key.XXXXXX")"
+        key_file="$(mktemp "$temp_root/dep-reviews-openai-key.XXXXXX")"
         cleanup() {
           rm -f "$key_file"
         }
         trap cleanup EXIT
-        printf '%s' "$ANTHROPIC_API_KEY_INPUT" > "$key_file"
-        unset ANTHROPIC_API_KEY_INPUT
-        INPUT_ANTHROPIC_API_KEY_FILE="$key_file" python3 "$GITHUB_ACTION_PATH/scripts/run_claude.py"
+        printf '%s' "$OPENAI_API_KEY_INPUT" > "$key_file"
+        unset OPENAI_API_KEY_INPUT
+        INPUT_OPENAI_API_KEY_FILE="$key_file" python3 "$GITHUB_ACTION_PATH/scripts/run_codex.py"
       env:
-        ANTHROPIC_API_KEY_INPUT: ${{ inputs.anthropic-api-key }}
-        INPUT_CLAUDE_MODEL: ${{ inputs.claude-model }}
-        INPUT_CLAUDE_ARGS: ${{ inputs.claude-args }}
+        OPENAI_API_KEY_INPUT: ${{ inputs.openai-api-key }}
+        INPUT_CODEX_MODEL: ${{ inputs.codex-model }}
+        INPUT_CODEX_ARGS: ${{ inputs.codex-args }}
 
     - name: Install and configure Reviews CLI
       id: setup-reviews
